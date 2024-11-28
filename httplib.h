@@ -612,7 +612,6 @@ using Ranges = std::vector<Range>;
 struct Request {
   std::string method;
   std::string path;
-  Params params;
   Headers headers;
   std::string body;
 
@@ -624,6 +623,7 @@ struct Request {
   // for server
   std::string version;
   std::string target;
+  Params params;
   MultipartFormDataMap files;
   Ranges ranges;
   Match matches;
@@ -2271,7 +2271,7 @@ inline std::wstring u8string_to_wstring(const char *s) {
     wlen = ::MultiByteToWideChar(
         CP_UTF8, 0, s, len,
         const_cast<LPWSTR>(reinterpret_cast<LPCWSTR>(ws.data())), wlen);
-    if (wlen != static_cast<int>(ws.size())) { ws.clear(); }
+    if (wlen != ws.size()) { ws.clear(); }
   }
   return ws;
 }
@@ -6340,6 +6340,7 @@ inline void Server::stop() {
     std::atomic<socket_t> sock(svr_sock_.exchange(INVALID_SOCKET));
     detail::shutdown_socket(sock);
     detail::close_socket(sock);
+    is_running_ = false;
   }
   is_decommisioned = false;
 }
@@ -6739,7 +6740,7 @@ inline bool Server::listen_internal() {
   {
     std::unique_ptr<TaskQueue> task_queue(new_task_queue());
 
-    while (svr_sock_ != INVALID_SOCKET) {
+    while (svr_sock_ != INVALID_SOCKET && is_running()) {
 #ifndef _WIN32
       if (idle_interval_sec_ > 0 || idle_interval_usec_ > 0) {
 #endif
@@ -7420,7 +7421,7 @@ inline bool ClientImpl::send(Request &req, Response &res, Error &error) {
 inline bool ClientImpl::is_ssl_peer_could_be_closed(SSL *ssl) const {
   char buf[1];
   return !SSL_peek(ssl, buf, 1) &&
-         SSL_get_error(ssl, 0) == SSL_ERROR_ZERO_RETURN;
+    SSL_get_error(ssl, 0) == SSL_ERROR_ZERO_RETURN;
 }
 #endif
 
@@ -7438,7 +7439,9 @@ inline bool ClientImpl::send_(Request &req, Response &res, Error &error) {
 
 #ifdef CPPHTTPLIB_OPENSSL_SUPPORT
       if (is_alive && is_ssl()) {
-        if (is_ssl_peer_could_be_closed(socket_.ssl)) { is_alive = false; }
+        if (is_ssl_peer_could_be_closed(socket_.ssl)) {
+          is_alive = false;
+        }
       }
 #endif
 
@@ -7797,13 +7800,7 @@ inline bool ClientImpl::write_request(Stream &strm, Request &req,
   {
     detail::BufferStream bstrm;
 
-    const auto &path_with_query =
-        req.params.empty() ? req.path
-                           : append_query_params(req.path, req.params);
-
-    const auto &path =
-        url_encode_ ? detail::encode_url(path_with_query) : path_with_query;
-
+    const auto &path = url_encode_ ? detail::encode_url(req.path) : req.path;
     detail::write_request_line(bstrm, req.method, path);
 
     header_writer_(bstrm, req.headers);
