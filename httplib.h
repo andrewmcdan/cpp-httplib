@@ -8,7 +8,7 @@
 #ifndef CPPHTTPLIB_HTTPLIB_H
 #define CPPHTTPLIB_HTTPLIB_H
 
-#define CPPHTTPLIB_VERSION "0.18.1"
+#define CPPHTTPLIB_VERSION "0.18.2"
 
 /*
  * Configuration
@@ -7980,9 +7980,7 @@ inline bool ClientImpl::process_request(Stream &strm, Request &req,
             : static_cast<ContentReceiverWithProgress>(
                   [&](const char *buf, size_t n, uint64_t /*off*/,
                       uint64_t /*len*/) {
-                    if (res.body.size() + n > res.body.max_size()) {
-                      return false;
-                    }
+                    assert(res.body.size() + n <= res.body.max_size());
                     res.body.append(buf, n);
                     return true;
                   });
@@ -7996,9 +7994,12 @@ inline bool ClientImpl::process_request(Stream &strm, Request &req,
 
     if (res.has_header("Content-Length")) {
       if (!req.content_receiver) {
-        auto len = std::min<size_t>(res.get_header_value_u64("Content-Length"),
-                                    res.body.max_size());
-        if (len > 0) { res.body.reserve(len); }
+        auto len = res.get_header_value_u64("Content-Length");
+        if (len > res.body.max_size()) {
+          error = Error::Read;
+          return false;
+        }
+        res.body.reserve(len);
       }
     }
 
